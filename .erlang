@@ -1,0 +1,31 @@
+register(dumb_watcher, spawn(fun () ->
+    knot:watch(["development_environment.md", "program.md"], fun (Changed) ->
+        Ends_with_erl = fun (Filename) ->
+            case filename:extension(Filename) of
+                ".erl" -> true;
+                _ -> false
+            end
+        end,
+
+        Compile = fun (Filename) ->
+            io:format("Compile: ~s~n", [Filename]),
+            {ok, Output} = compile:file(Filename, [{outdir, "code/ebin"}, report, verbose]),
+            list_to_atom(filename:basename(Output, ".erl"))
+        end,
+
+        Reload = fun (Module) ->
+            io:format("Reloading: ~s~n", [Module]),
+            code:purge(Module),
+            code:load_file(Module)
+        end,
+
+        Compile_and_reload = fun (Filename) ->
+            Reload(Compile(Filename))
+        end,
+
+        io:format("Changed: ~p~n", [Changed]),
+        Output = knot:process_files(Changed),
+        Erl_files = lists:filter(Ends_with_erl, Output),
+        lists:map(Compile_and_reload, Erl_files)
+    end)
+end)).
