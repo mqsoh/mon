@@ -106,6 +106,24 @@ create an ignored directory `.docker_home` that will have the bash/erl history
 for the ultimate in convenience. It also means that I can add bash aliases if I
 want. (I'm always running `ll` in containers and it's never defined.)
 
+# Helper Scripts
+
+To build the image, you can use `./build`.
+
+```{.bash name="file:build"}
+#!/bin/bash
+here=$(realpath $(dirname $0))
+docker build --tag mqsoh/mon $here
+```
+
+To run the shell with automatic compiling and code reloading, use `./shell`.
+
+```{.bash name="file:shell"}
+#!/bin/bash
+here=$(realpath $(dirname $0))
+docker run --interactive --tty --rm --volume $here:/mon --name mon mqsoh/mon
+```
+
 
 
 [knot]: https://github.com/mqsoh/knot

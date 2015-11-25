@@ -1,0 +1,3 @@
+#!/bin/bash
+here=$(realpath $(dirname $0))
+docker run --interactive --tty --rm --volume $here:/mon --name mon mqsoh/mon
