@@ -121,6 +121,9 @@ To run the shell with automatic compiling and code reloading, use `./shell`.
 ```{.bash name="file:shell"}
 #!/bin/bash
 here=$(realpath $(dirname $0))
+if docker ps --all --filter status=exited --format '{{.Names}}' | grep '^mon$' > /dev/null; then
+  docker rm mon > /dev/null
+fi
 docker run --interactive --tty --rm --volume $here:/mon --name mon mqsoh/mon
 ```
 

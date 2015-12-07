@@ -34,25 +34,24 @@ will look like:
     Application (callback module is `mon_app`)
       v
     Supervisor (callback module is `mon_sup`)
-      v
-    Supervisor (callback module is `mon`)
       |
-      |-----------.-----------.------.
-      v           v           v      v
-    Worker 1    Worker 2    ...    Worker N
+      |---------.-----------.-----------.------.
+      v         v           v           v      v
+    Mon API    Worker 1    Worker 2    ...    Worker N
 
-The worker nodes will be `gen_server`s because I don't know what else they
-should be. [The OTP design principles][] lists the standard OTP behaviors; none
-seem appropriate. The workers will have basically unimplemented functions. This
-also seems typical in Erlang. I think it's okay because there's not a lot of
-ceremony around these functions. Anyway...
+The mon API and worker nodes will be `gen_server`s because I don't know what
+else they should be. [The OTP design principles][] lists the standard OTP
+behaviors; none seem appropriate. The workers will have unimplemented functions
+but this also seems typical in Erlang. I think it's okay because there's not
+a lot of ceremony around these functions (they usually look like `whatever(_)
+-> ok.`. Anyway...
 
 
 
 # The Application
 
 When you run `application:start(mon).`, the `application` module searches the
-code path for a [`mon.app`][] file. The `mod` specified therein is called 'the
+code path for a `[mon.app][]` file. The `mod` specified therein is called 'the
 application callback module'.
 
 (When working with `rebar` or other Erlang build tools, an `.app.src` is put in
@@ -61,6 +60,7 @@ think it's a big deal to check in a `.app` into the ebin directory under source
 control.)
 
 ###### file:code/ebin/mon.app
+
 ```{name="file:code/ebin/mon.app"}
 {application, mon,
   [{mod, {mon_app, []}}]}.
@@ -70,6 +70,7 @@ The application module starts a master process and runs the `start/2` function
 in the callback module.
 
 ###### file:code/src/mon_app.erl
+
 ```{name="file:code/src/mon_app.erl"}
 -module(mon_app).
 -behavior(application).
@@ -92,6 +93,7 @@ convention, `mon_sup`.
 # The Supervisor
 
 ###### file:code/src/mon_sup.erl
+
 ```{name="file:code/src/mon_sup.erl"}
 -module(mon_sup).
 -behavior(supervisor).
@@ -102,8 +104,7 @@ convention, `mon_sup`.
 
 start_link() ->
   io:format("mon: Supervisor starting link.~n"),
-  supervisor:start_link({local, ?MODULE}, ?MODULE, []),
-  supervisor:start_child(?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
   io:format("mon: Supervisor init.~n"),
@@ -133,136 +134,114 @@ When you're wondering about what functions a callback module should support,
 you can check the bottom of the man page for that module under `CALLBACK
 FUNCTIONS`. Here's [the supervisor man page][].
 
-The `start_link` function ends by starting its own child.
-
 ## Restart Strategy and Child Spec
 
 The `init` function returns the restart strategy and child spec. This is the
 restart strategy.
 
 ```{name="mon restart strategy"}
-#{strategy => simple_one_for_one,
+#{strategy => one_for_one,
   intensity => 10,
   period => 1}
 ```
 
-The `simple_one_for_one` strategy refers to a simplified version of
-`one_for_one`. This is used when you only need one child process type. The
-intensity and period of restarts I selected is random. It instructs OTP to shut
-down the children and their supervisor if more than ten restarts happen in one
-second.
+The `one_for_one` strategy means that if a child process dies, only that one
+process is restarted. (The `one_for_all` strategy will kill and restart all the
+children.) The intensity and period of restarts I selected is random. It
+instructs OTP to shut down the children and their supervisor if more than ten
+restarts happen in one second.
 
 The following is the child spec. The `id` is used internally by the supervisor.
-The `start` value is a `module-function-arguments` tuple. The type can be
-`worker` or `supervisor`; I don't remember the details, but it affects how the
-process is handled when it's killed.
+The `start` value is a `module-function-arguments` tuple. You can specify
+a `type`, which can be `worker` or `supervisor`; I don't remember the details,
+but it affects how the process is handled when it's killed. The `mon` process
+will be a `gen_server`, so I'll use the default value of `worker`.
 
 ```{name="mon child spec"}
 [#{id => mon,
-   start => {mon, start_link, []},
-   type => supervisor}]
+   start => {mon, start_link, []}}]
 ```
 
 
 
 # Our Process
 
-Our process is the second supervisor in the supervisor tree. It's very similar
-to `mon_sup` -- so similar that I'm wondering if I need both. When the first
-argument to `start_link` is `{local, whatever}` it means that the process is
-registered under that name. (You can send messages to it by name instead of a
-PID.)
+Our process should now have been started by the supervisor.
 
 ###### file:code/src/mon.erl
+
 ```{.erlang name="file:code/src/mon.erl"}
 -module(mon).
--behavior(supervisor).
+-behavior(gen_server).
 -export([
   <<mon api>>,
+
+  % Supervisor `start` function.
   start_link/0,
-  init/1
+
+  % gen_server callbacks
+  init/1,
+  handle_call/3,
+  handle_cast/2,
+  handle_info/2,
+  terminate/2,
+  code_change/3
 ]).
 
 start_link() ->
-  io:format("mon: Mon process started.~n"),
-  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  io:format("mon: mon:start_link()~n"),
+  gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init([]) ->
-  io:format("mon: Mon process inited.~n"),
-  {ok, {
-    #{strategy => simple_one_for_one,
-      intensity => 10,
-      period => 1}
-    ,
-    [#{id => worker,
-       start => {worker, start_link, []}}]
-  }}.
+  io:format("mon: mon:init([])~n"),
+  {ok, unused_state}.
+
+handle_call(Request, From, State) ->
+  io:format("mon: mon:handle_call(~p, ~p, ~p)~n", [Request, From, State]),
+  case Request of
+    <<handle mon calls>>
+    _ ->
+      {noreply, State}
+  end.
+
+handle_cast(Request, State) ->
+  io:format("mon: mon:handle_cast(~p, ~p)~n", [Request, State]),
+  {noreply, State}.
+
+handle_info(Info, State) ->
+  io:format("mon: mon:handle_info(~p, ~p)~n", [Info, State]),
+  {noreply, State}.
+
+terminate(Reason, State) ->
+  io:format("mon: mon:terminate(~p, ~p)~n", [Reason, State]),
+  return_value_ignored.
+
+code_change(Old_version, State, Extra) ->
+  io:format("mon: mon:code_change(~p, ~p, ~p)~n", [Old_version, State, Extra]),
+  {ok, State}.
 
 <<mon functions>>
-
-<<mon receive loop>>
 ```
 
-The restart strategy is the same as in `mon_sup` because I can't make an
-informed decision about that at the moment. We only have one type of child
-process, so `simple_one_for_one` is appropriate again.
 
-This is the process I want to send messages to, so the end of `start_link`
-starts the receive `loop`.
-
-**NOTE**: There's three sections above: `mon api`, `mon functions`, and `mon
-receive loop`. These are placeholders for code I will be writing later in the
-document.
-
-## Messages to the Mon Process
-
-I'll provide a public API to the mon process, but those functions will be
-sending messages to the registered `mon` process. This is typical in Erlang.
-Originally, I thought it looked like a process was sending a message to itself,
-but that's wrong.
-
-If I have a function that looks like `foobar() -> ?MODULE ! {self(), foobar}.`
-and I call it from the shell with `mymodule:foobar().`, then `self()` is not
-the process registered under the `mymodule` name. It's the shell PID. It's
-strange at first, but I've seen this done in Joe Armstrong's code and has the
-benefit of simple usage. You can say:
-
-> Start the mon application. The API exposes the following functions: `mon:ls`,
-> `mon:watch`, etc.
-
-The user doesn't need to know anything about the supervision tree.
-
-Anyway, here's that standard receive loop.
-
-###### mon receive loop
-```{.erlang name="mon receive loop"}
-loop() ->
-  io:format("mon: Receive loop iteration.  FART ~p~n", [self()]),
-  receive
-    <<incoming mon message>>
-    Any ->
-      io:format("mon: An unhandled message was recieved: ~p~n", [Any])
-  end.
-```
 
 ## List
 
-```{name="mon api"}
+```{.erlang name="mon api"}
 list/0
 ```
-
-```{name="incoming mon message"}
-{Pid, list} ->
-  io:format("mon: I see that you want a list, but I'm not doing anything yet.~n");
+```{.erlang name="handle mon calls"}
+list ->
+  {reply,
+    "Foo\n"
+    "Bar"
+  , State};
 ```
-
-```{name="mon functions"}
+```{.erlang name="mon functions"}
 list() ->
-  ?MODULE ! {self(), list}.
+  Data = gen_server:call(?MODULE, list),
+  io:format("|~s|~n", [Data]).
 ```
-
-
-
 
 
 
