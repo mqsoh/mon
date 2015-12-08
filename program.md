@@ -164,9 +164,10 @@ will be a `gen_server`, so I'll use the default value of `worker`.
 
 
 
-# Our Process
+# The Mon Process
 
-Our process should now have been started by the supervisor.
+Our process has been started by the supervisor. In the following block of code,
+only the `start_link/0`, `init/1` and `handle_call/3` are used.
 
 ###### file:code/src/mon.erl
 
@@ -182,6 +183,8 @@ Our process should now have been started by the supervisor.
   % gen_server callbacks
   init/1,
   handle_call/3,
+
+  % Unused gen_server callbacks.
   handle_cast/2,
   handle_info/2,
   terminate/2,
@@ -194,7 +197,7 @@ start_link() ->
 
 init([]) ->
   io:format("mon: mon:init([])~n"),
-  {ok, unused_state}.
+  {ok, []}.
 
 handle_call(Request, From, State) ->
   io:format("mon: mon:handle_call(~p, ~p, ~p)~n", [Request, From, State]),
@@ -203,6 +206,8 @@ handle_call(Request, From, State) ->
     _ ->
       {noreply, State}
   end.
+
+% Unused gen_server callbacks.
 
 handle_cast(Request, State) ->
   io:format("mon: mon:handle_cast(~p, ~p)~n", [Request, State]),
@@ -223,25 +228,143 @@ code_change(Old_version, State, Extra) ->
 <<mon functions>>
 ```
 
+There's three code sections defined above. The `<<mon api>>` section is where
+exported functions are defined; the trailing comma means that any lines
+I append to the section will end in a comma. The `<<handle mon calls>>` is
+inside a case statement and is where I'll match calls from `gen_server:call`.
+Finally, the `<<mon functions>>` section is where I'll define the mon API
+functions.
 
+This is the real power of a literate program. The compiler needs code in
+various places inside the file, but having related code grouped together helps
+humans understand.
 
-## List
+## Starting Workers
 
+This is my first usage of the three code sections defined in the `mon` module.
+They will be used to add behavior to the `mon` process. The exported functions
+will all be similar in that they will simply pass on arguments to
+`gen_server:call`. The handle sections are embedded inside that `case`
+statement above. The only bit of context I need to remember is that the `State`
+is a list of the names of started `worker` processes.
+
+###### mon api
 ```{.erlang name="mon api"}
-list/0
+watch/1
 ```
-```{.erlang name="handle mon calls"}
-list ->
-  {reply,
-    "Foo\n"
-    "Bar"
-  , State};
-```
+###### mon functions
 ```{.erlang name="mon functions"}
-list() ->
-  Data = gen_server:call(?MODULE, list),
-  io:format("|~s|~n", [Data]).
+watch(Url) ->
+  gen_server:call(?MODULE, {watch, Url}).
 ```
+###### handle mon calls
+```{.erlang name="handle mon calls"}
+{watch, Url} ->
+  Name = list_to_atom(Url),
+  Ret = supervisor:start_child(mon_sup, #{id => Name,
+                                          start => {worker, start_link, [Name]}}),
+  case Ret of
+    {ok, _} ->
+      {reply, ok, [Name | State]};
+    {ok, _, _} ->
+      {reply, ok, [Name | State]};
+    {error, {already_started, _}} ->
+      {reply, already_started, State};
+    {error, Reason} ->
+      {reply, Reason, State}
+  end;
+```
+
+This establishes a facet of the `worker` module. It needs at `start_link/1`
+function that uses the given name when registering with the supervisor. In the
+`mon` module, I was able to use the `?MODULE` macro as the name of the process.
+That was okay because it was a globally unique name. I'll have many worker
+processes, each with their own name.
+
+
+
+# The Worker Processes
+
+Workers will also be a `gen_server` because it's the most generic OTP behavior.
+I'll have the same unused functions as in `mon`. That's kind of not cool, so
+I'm not sure if it's correct. I know Elixir added a couple even more generic
+behaviors. I think they call them 'events' and 'tasks' or something. I wonder
+if I could add something like that...
+
+One thing I'll do differently is that, since the `mon` module is the API
+I won't bother writing the same sort of API for the worker processes. I'll just
+write `gen_server:call`s in the `mon` module so that I'll only need to augment
+`handle_call` in this module.
+
+###### file:code/src/worker.erl
+```{.erlang name="file:code/src/worker.erl"}
+-module(worker).
+-behavior(gen_server).
+-export([
+  % Supervisor `start` function.
+  start_link/1,
+
+  % gen_server callbacks
+  init/1,
+  handle_call/3,
+  terminate/2,
+
+  % Unused gen_server callbacks.
+  handle_cast/2,
+  handle_info/2,
+  code_change/3
+]).
+
+start_link(Name) ->
+  io:format("mon: worker:start_link(~p)~n", [Name]),
+  gen_server:start_link({local, Name}, ?MODULE, [Name], []).
+
+init([Name]) ->
+  io:format("mon: worker:init(~p)~n", [[Name]]),
+  {ok, Timer} = timer:apply_interval(5000, gen_server, call, [Name, heartbeat]),
+  {ok, #{name => Name, timer => Timer}}.
+
+handle_call(Request, From, State) ->
+  io:format("mon: worker:handle_call(~p, ~p, ~p)~n", [Request, From, State]),
+  case Request of
+    <<worker calls>>
+    _ ->
+      {noreply, State}
+  end.
+
+terminate(Reason, #{timer := Timer} = State) ->
+  io:format("mon: worker:terminate(~p, ~p)~n", [Reason, State]),
+  timer:cancel(Timer).
+
+% Unused gen_server callbacks.
+
+handle_cast(Request, State) ->
+  io:format("mon: worker:handle_cast(~p, ~p)~n", [Request, State]),
+  {noreply, State}.
+
+handle_info(Info, State) ->
+  io:format("mon: worker:handle_info(~p, ~p)~n", [Info, State]),
+  {noreply, State}.
+
+code_change(Old_version, State, Extra) ->
+  io:format("mon: worker:code_change(~p, ~p, ~p)~n", [Old_version, State, Extra]),
+  {ok, State}.
+```
+
+Check out that `init` function -- the `timer:apply_interval` is the heart beat
+for this process. (It's cancelled in the `terminate` function.) The `state` for
+this module is a map with the name of the running process, a reference to the
+timer.
+
+**TODO**: The state will need a list of statuses, too.
+
+## Test worker function
+
+```{.erlang name="worker calls"}
+status ->
+  {reply, "I'm okay. How are you?", State};
+```
+
 
 
 
