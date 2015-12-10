@@ -77,16 +77,18 @@ in the callback module.
 -export([start/2, stop/1]).
 
 start(_Start_type, _Start_args) ->
-  io:format("mon: Starting app.~n"),
+  <<Start applications required by the HTTP client.>>
   mon_sup:start_link().
 
 stop(_State) ->
-  io:format("mon: Stopping app.~n"),
   ok.
 ```
 
 All this module does is start the supervisor which is named, also by
 convention, `mon_sup`.
+
+After I've got the worker processes running, I'll [start applications required
+by the HTTP client](#start-applications-required-by-the-http-client).
 
 
 
@@ -103,11 +105,9 @@ convention, `mon_sup`.
 ]).
 
 start_link() ->
-  io:format("mon: Supervisor starting link.~n"),
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  io:format("mon: Supervisor init.~n"),
   {ok, {
       <<mon restart strategy>>
       ,
@@ -175,7 +175,7 @@ only the `start_link/0`, `init/1` and `handle_call/3` are used.
 -module(mon).
 -behavior(gen_server).
 -export([
-  <<mon api>>,
+  <<mon exports>>,
 
   % Supervisor `start` function.
   start_link/0,
@@ -192,48 +192,40 @@ only the `start_link/0`, `init/1` and `handle_call/3` are used.
 ]).
 
 start_link() ->
-  io:format("mon: mon:start_link()~n"),
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init([]) ->
-  io:format("mon: mon:init([])~n"),
   {ok, []}.
 
-handle_call(Request, From, State) ->
-  io:format("mon: mon:handle_call(~p, ~p, ~p)~n", [Request, From, State]),
+handle_call(Request, _From, State) ->
   case Request of
-    <<handle mon calls>>
+    <<mon calls>>
     _ ->
       {noreply, State}
   end.
 
 % Unused gen_server callbacks.
 
-handle_cast(Request, State) ->
-  io:format("mon: mon:handle_cast(~p, ~p)~n", [Request, State]),
+handle_cast(_Request, State) ->
   {noreply, State}.
 
-handle_info(Info, State) ->
-  io:format("mon: mon:handle_info(~p, ~p)~n", [Info, State]),
+handle_info(_Info, State) ->
   {noreply, State}.
 
-terminate(Reason, State) ->
-  io:format("mon: mon:terminate(~p, ~p)~n", [Reason, State]),
+terminate(_Reason, _State) ->
   return_value_ignored.
 
-code_change(Old_version, State, Extra) ->
-  io:format("mon: mon:code_change(~p, ~p, ~p)~n", [Old_version, State, Extra]),
+code_change(_Old_version, State, _Extra) ->
   {ok, State}.
 
 <<mon functions>>
 ```
 
-There's three code sections defined above. The `<<mon api>>` section is where
-exported functions are defined; the trailing comma means that any lines
-I append to the section will end in a comma. The `<<handle mon calls>>` is
-inside a case statement and is where I'll match calls from `gen_server:call`.
-Finally, the `<<mon functions>>` section is where I'll define the mon API
-functions.
+There's three code sections defined above. The `<<mon exports>>` section is
+where exported functions are defined; the trailing comma means that any lines
+I append to the section will end in a comma. The `<<mon calls>>` is inside
+a case statement and is where I'll match calls from `gen_server:call`. Finally,
+the `<<mon functions>>` section is where I'll define the mon API functions.
 
 This is the real power of a literate program. The compiler needs code in
 various places inside the file, but having related code grouped together helps
@@ -248,8 +240,8 @@ will all be similar in that they will simply pass on arguments to
 statement above. The only bit of context I need to remember is that the `State`
 is a list of the names of started `worker` processes.
 
-###### mon api
-```{.erlang name="mon api"}
+###### mon exports
+```{.erlang name="mon exports"}
 watch/1
 ```
 ###### mon functions
@@ -257,12 +249,12 @@ watch/1
 watch(Url) ->
   gen_server:call(?MODULE, {watch, Url}).
 ```
-###### handle mon calls
-```{.erlang name="handle mon calls"}
+###### mon calls
+```{.erlang name="mon calls"}
 {watch, Url} ->
   Name = list_to_atom(Url),
   Ret = supervisor:start_child(mon_sup, #{id => Name,
-                                          start => {worker, start_link, [Name]}}),
+                                          start => {worker, start_link, [Name, Url]}}),
   case Ret of
     {ok, _} ->
       {reply, ok, [Name | State]};
@@ -275,7 +267,7 @@ watch(Url) ->
   end;
 ```
 
-This establishes a facet of the `worker` module. It needs at `start_link/1`
+This establishes a facet of the `worker` module. It needs a `start_link/2`
 function that uses the given name when registering with the supervisor. In the
 `mon` module, I was able to use the `?MODULE` macro as the name of the process.
 That was okay because it was a globally unique name. I'll have many worker
@@ -302,7 +294,7 @@ write `gen_server:call`s in the `mon` module so that I'll only need to augment
 -behavior(gen_server).
 -export([
   % Supervisor `start` function.
-  start_link/1,
+  start_link/2,
 
   % gen_server callbacks
   init/1,
@@ -315,39 +307,35 @@ write `gen_server:call`s in the `mon` module so that I'll only need to augment
   code_change/3
 ]).
 
-start_link(Name) ->
-  io:format("mon: worker:start_link(~p)~n", [Name]),
-  gen_server:start_link({local, Name}, ?MODULE, [Name], []).
+start_link(Name, Url) ->
+  gen_server:start_link({local, Name}, ?MODULE, [Name, Url], []).
 
-init([Name]) ->
-  io:format("mon: worker:init(~p)~n", [[Name]]),
-  {ok, Timer} = timer:apply_interval(5000, gen_server, call, [Name, heartbeat]),
-  {ok, #{name => Name, timer => Timer}}.
+init([Name, Url]) ->
+  {ok, Timer} = timer:apply_interval(10000, gen_server, call, [Name, heartbeat]),
+  {ok, #{name => Name,
+         timer => Timer,
+         url => Url,
+         last_status => "Waiting on first heartbeat."}}.
 
-handle_call(Request, From, State) ->
-  io:format("mon: worker:handle_call(~p, ~p, ~p)~n", [Request, From, State]),
+handle_call(Request, _From, State) ->
   case Request of
     <<worker calls>>
     _ ->
       {noreply, State}
   end.
 
-terminate(Reason, #{timer := Timer} = State) ->
-  io:format("mon: worker:terminate(~p, ~p)~n", [Reason, State]),
+terminate(_Reason, #{timer := Timer}) ->
   timer:cancel(Timer).
 
 % Unused gen_server callbacks.
 
-handle_cast(Request, State) ->
-  io:format("mon: worker:handle_cast(~p, ~p)~n", [Request, State]),
+handle_cast(_Request, State) ->
   {noreply, State}.
 
-handle_info(Info, State) ->
-  io:format("mon: worker:handle_info(~p, ~p)~n", [Info, State]),
+handle_info(_Info, State) ->
   {noreply, State}.
 
-code_change(Old_version, State, Extra) ->
-  io:format("mon: worker:code_change(~p, ~p, ~p)~n", [Old_version, State, Extra]),
+code_change(_Old_version, State, _Extra) ->
   {ok, State}.
 ```
 
@@ -356,15 +344,238 @@ for this process. (It's cancelled in the `terminate` function.) The `state` for
 this module is a map with the name of the running process, a reference to the
 timer.
 
-**TODO**: The state will need a list of statuses, too.
+## The Heartbeat
 
-## Test worker function
+If this were a real application, I wouldn't do that dumb heartbeat. What
+happens if a response takes longer than the length of the heartbeat? Also, if
+the target site goes down, I'd want to implement exponential back off. For now
+it's this shit.
+
+
+###### Start applications required by the HTTP client.
+```{.erlang name="Start applications required by the HTTP client."}
+ok = application:ensure_started(asn1),
+ok = application:ensure_started(crypto),
+ok = application:ensure_started(public_key),
+ok = application:ensure_started(ssl),
+ok = application:ensure_started(inets),
+```
+
+Now I can request a web page and store the status code.
+
+###### worker calls
+```{.erlang name="worker calls"}
+heartbeat ->
+  #{url := Url} = State,
+  Status = case httpc:request(Url) of
+    {error, Reason} ->
+      io_lib:format("httpc error: ~p", [Reason]);
+
+    {ok, {{_Http_version, Status_code, Status_name}, _Headers, _Body}} ->
+      io_lib:format("~B ~s", [Status_code, Status_name]);
+
+    {ok, {Status_code, _Body}} ->
+      integer_to_list(Status_code);
+
+    {ok, Request_id} ->
+      io_lib:format("Why did I get a request ID (~p)?", [Request_id])
+  end,
+  {noreply, maps:put(last_status, Status, State)};
+```
+
+`httpc:request` has three different return values. At a glance I couldn't
+determine why it would return a 'request id', so I updated the status with
+a representation of whatever it is.
+
+
+
+# Worker Status
+
+Now I'm going to rocks your socks off. With this literate program, I can always
+append to a section. Any sections with the same name are concatenated. That
+means that I can add features to both the `mon` and `worker` modules in the
+same place.
+
+The mon export.
+
+```{.erlang name="mon exports"}
+status/1
+```
+
+The mon API function.
+
+```{.erlang name="mon functions"}
+status(Url) ->
+  gen_server:call(?MODULE, {status, Url}).
+```
+
+Handling the mon call.
+
+```{.erlang name="mon calls"}
+{status, Url} ->
+  Name = list_to_atom(Url),
+  {reply, gen_server:call(Name, status), State};
+```
+
+Returning the status from the worker.
 
 ```{.erlang name="worker calls"}
 status ->
-  {reply, "I'm okay. How are you?", State};
+  #{last_status := Status} = State,
+  {reply, Status, State};
 ```
 
+
+
+# The Status of All Workers
+
+The mon process state is a list of all the process names of the workers. What
+I'd like to do is loop through them and print the process name and its current
+status.
+
+First export the API function.
+
+```{.erlang name="mon exports"}
+status/0
+```
+
+Then wrap the gen_server.
+
+```{.erlang name="mon functions"}
+status() ->
+  gen_server:call(?MODULE, status).
+```
+
+And then loop through them and print.
+
+```{.erlang name="mon calls"}
+status ->
+  lists:map(fun (Name) ->
+              io:format("~s: ~s~n", [Name, gen_server:call(Name, status)])
+            end,
+            State),
+  {reply, ok, State};
+```
+
+Now you can use `mon:status().` to get a list of the last status code for all
+workers.
+
+
+
+# Removing a Worker
+
+You'll want to stop watching sites that you've added.
+
+```{.erlang name="mon exports"}
+rm/1
+```
+
+```{.erlang name="mon functions"}
+rm(Url) ->
+  gen_server:call(?MODULE, {rm, Url}).
+```
+
+```{.erlang name="mon calls"}
+{rm, Url} ->
+  Name = list_to_atom(Url),
+  supervisor:terminate_child(mon_sup, Name),
+  {reply, ok, lists:delete(Name, State)};
+```
+
+
+
+# A Sample Session
+
+First you should build the Docker images with:
+
+    ./build
+
+Then you can run the shell. (The `build` and `shell` scripts are described in
+the [development environment][].)
+
+    $ ./shell
+    Erlang/OTP 18 [erts-7.1] [source] [64-bit] [smp:8:8] [async-threads:10] [hipe] [kernel-poll:false]
+
+    Changed: ["development_environment.md","program.md"]
+    Eshell V7.1  (abort with ^G)
+    1> Compile: ./code/src/mon.erl
+    Reloading: mon
+    Compile: ./code/src/worker.erl
+    Reloading: worker
+    Compile: ./code/src/mon_sup.erl
+    Reloading: mon_sup
+    Compile: ./code/src/mon_app.erl
+    Reloading: mon_app
+    Site1 = "https://www.google.com", Site2 = "http://httpbin.org/status/418", Site3 = "This isn't a URL.".
+    "This isn't a URL."
+    2> application:start(mon).
+    ok
+    3> mon:watch(Site1), mon:watch(Site2), mon:watch(Site3).
+    ok
+    4> mon:status().
+    This isn't a URL.: Waiting on first heartbeat.
+    http://httpbin.org/status/418: Waiting on first heartbeat.
+    https://www.google.com: Waiting on first heartbeat.
+    ok
+    5> % Waiting ten seconds.
+    5> mon:status().
+    This isn't a URL.: httpc error: no_scheme
+    http://httpbin.org/status/418: 418 I'M A TEAPOT
+    https://www.google.com: 200 OK
+    ok
+    6> mon:rm(Site3).
+    ok
+    7> mon:status().
+    http://httpbin.org/status/418: 418 I'M A TEAPOT
+    https://www.google.com: 200 OK
+    ok
+    8> mon:status(Site2).
+    ["418",32,"I'M A TEAPOT"]
+    9> application:stop(mon).
+
+    =INFO REPORT==== 10-Dec-2015::05:51:29 ===
+        application: mon
+        exited: stopped
+        type: temporary
+    ok
+
+
+
+# For the Future (But Probably Not)
+
+I should be able to use names and configure parameters in the workers.
+`mon:watch` should look more like
+
+    mon:watch(google, "https://www.google.com/", #{frequency => 10 * 60 * 1000})
+
+I should be able to check things other than the status code. This could be
+different types of worker modules, like `worker_grep` that looks inside the
+body of the page. Then the supervisor will watch processes of `mon`, `worker`,
+and/or `worker_grep`.
+
+Or maybe the request comparison is done with a callback. Then `mon:watch` would
+look like
+
+    mon:watch(google, "https://www.google.com/", #{frequency => 10 * 60 * 1000,
+                                                   checker => {my_status_checkers, grep, []}})
+
+With a module like
+
+    -module(my_status_checkers).
+
+    grep(<httpc:request response>) ->
+      ...
+
+Shouldn't I be able to *do* something with the status checks? Send an email or
+something.
+
+The sites I'm watching should be persisted somewhere and automatically loaded
+when the mon application is started.
+
+I should maintain a history with past events and the time they were returned.
+
+In any case, I made a supervision tree and a dinky app, so mission
+accomplished.
 
 
 
@@ -375,3 +586,4 @@ status ->
 [Modules]: http://www.erlang.org/doc/man_index.html
 [`mon.app`]: http://www.erlang.org/doc/man/app.html
 [the supervisor man page]: http://www.erlang.org/doc/man/supervisor.html
+[development environment]: development_environment.md
