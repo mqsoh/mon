@@ -72,6 +72,7 @@ in the callback module.
 ###### file:code/src/mon_app.erl
 
 ```{name="file:code/src/mon_app.erl"}
+% This file was generated from the program.md in the root of this repository.
 -module(mon_app).
 -behavior(application).
 -export([start/2, stop/1]).
@@ -97,6 +98,7 @@ by the HTTP client](#start-applications-required-by-the-http-client).
 ###### file:code/src/mon_sup.erl
 
 ```{name="file:code/src/mon_sup.erl"}
+% This file was generated from the program.md in the root of this repository.
 -module(mon_sup).
 -behavior(supervisor).
 -export([
@@ -172,6 +174,7 @@ only the `start_link/0`, `init/1` and `handle_call/3` are used.
 ###### file:code/src/mon.erl
 
 ```{.erlang name="file:code/src/mon.erl"}
+% This file was generated from the program.md in the root of this repository.
 -module(mon).
 -behavior(gen_server).
 -export([
@@ -290,6 +293,7 @@ write `gen_server:call`s in the `mon` module so that I'll only need to augment
 
 ###### file:code/src/worker.erl
 ```{.erlang name="file:code/src/worker.erl"}
+% This file was generated from the program.md in the root of this repository.
 -module(worker).
 -behavior(gen_server).
 -export([
