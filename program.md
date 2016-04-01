@@ -51,7 +51,7 @@ a lot of ceremony around these functions (they usually look like `whatever(_)
 # The Application
 
 When you run `application:start(mon).`, the `application` module searches the
-code path for a `[mon.app][]` file. The `mod` specified therein is called 'the
+code path for a [mon.app][] file. The `mod` specified therein is called 'the
 application callback module'.
 
 (When working with `rebar` or other Erlang build tools, an `.app.src` is put in
@@ -588,6 +588,6 @@ accomplished.
 [a list of the man pages]: http://www.erlang.org/doc/man_index.html
 [erlang.org]: http://www.erlang.org/
 [Modules]: http://www.erlang.org/doc/man_index.html
-[`mon.app`]: http://www.erlang.org/doc/man/app.html
+[mon.app]: http://www.erlang.org/doc/man/app.html
 [the supervisor man page]: http://www.erlang.org/doc/man/supervisor.html
 [development environment]: development_environment.md
